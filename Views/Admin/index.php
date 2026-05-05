@@ -106,7 +106,7 @@
      <div class="row g-4">
 
          <div class="col-md-4">
-             <a href="<?php echo BASE_URL; ?>facturas/nueva" class="quick-action">
+             <a href="<?php echo BASE_URL; ?>admin/facturas/" class="quick-action">
                  <div class="quick-icon">
                      <i data-feather="plus-circle"></i>
                  </div>
@@ -118,7 +118,7 @@
          </div>
 
          <div class="col-md-4">
-             <a href="<?php echo BASE_URL; ?>clientes" class="quick-action">
+             <a href="<?php echo BASE_URL; ?>admin/clientes" class="quick-action">
                  <div class="quick-icon">
                      <i data-feather="user-plus"></i>
                  </div>
@@ -130,7 +130,7 @@
          </div>
 
          <div class="col-md-4">
-             <a href="<?php echo BASE_URL; ?>usuarios" class="quick-action">
+             <a href="<?php echo BASE_URL; ?>admin/usuarios" class="quick-action">
                  <div class="quick-icon">
                      <i data-feather="shield"></i>
                  </div>

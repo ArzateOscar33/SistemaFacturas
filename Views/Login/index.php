@@ -191,7 +191,7 @@
 </head>
 
 <body>
-    <?PHP echo password_hash("@Osc4r4rz4t3", PASSWORD_BCRYPT); ?>
+
     <main class="login-wrapper">
         <div class="login-card">
             <div class="row g-0">
