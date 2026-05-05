@@ -1,8 +1,8 @@
 <?php
-const BASE_URL = "http://localhost/facturas/";
+const BASE_URL = "http://localhost/SistemaFacturas/";
 const HOST = "localhost";
 const USER = "root";
-const PASS = "";
+const PASS = "@Osc4r4rz4t3";
 const DB = "sistema_facturacion";
 const CHARSET = "charset=utf8";
 const TITLE = "Sistema Facturas";

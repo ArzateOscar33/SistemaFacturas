@@ -1,3 +1,4 @@
+alert("conectado al login.js");
 document.addEventListener("DOMContentLoaded", function () {
   const form = document.getElementById("formLogin");
   const btn = document.getElementById("btnLogin");
