@@ -189,6 +189,33 @@
                                     </div>
 
                                     <div class="col-md-4">
+                                        <label for="id_cliente_direccion" class="form-label">
+                                            Dirección de facturación <span class="required-mark">*</span>
+                                        </label>
+                                        <select id="id_cliente_direccion" name="id_cliente_direccion" class="form-select">
+                                            <option value="">Seleccione una dirección</option>
+                                        </select>
+                                        <div class="helper-text">
+                                            Se cargarán las direcciones del cliente seleccionado.
+                                        </div>
+                                    </div>
+
+                                    <div class="col-md-12">
+                                        <label for="direccion_facturacion" class="form-label">
+                                            Dirección usada en la factura <span class="required-mark">*</span>
+                                        </label>
+                                        <textarea class="form-control"
+                                            id="direccion_facturacion"
+                                            name="direccion_facturacion"
+                                            rows="3"
+                                            placeholder="Dirección de facturación que aparecerá en el PDF"
+                                            readonly></textarea>
+                                        <div class="helper-text">
+                                            Esta dirección se guardará directamente en la factura. Puedes ajustarla sin cambiar el catálogo del cliente.
+                                        </div>
+                                    </div>
+
+                                    <div class="col-md-4">
                                         <label for="sales_man" class="form-label">Sales man</label>
                                         <input type="text"
                                             class="form-control"
@@ -367,5 +394,156 @@
 </div>
 
 <script src="<?php echo BASE_URL; ?>Assets/Js/facturas.js"></script>
+
+<script>
+    document.addEventListener("DOMContentLoaded", function() {
+        const formFactura = document.getElementById("formFactura");
+        const modalFacturaEl = document.getElementById("modalFactura");
+        const direccionFacturacion = document.getElementById("direccion_facturacion");
+
+        /*
+         * La dirección de facturación NO debe editarse manualmente.
+         * Se llena únicamente desde el select de direcciones.
+         * readonly sí se envía en FormData; disabled NO.
+         */
+        if (direccionFacturacion) {
+            direccionFacturacion.setAttribute("readonly", "readonly");
+            direccionFacturacion.classList.add("bg-light");
+            direccionFacturacion.style.cursor = "not-allowed";
+            direccionFacturacion.title = "Selecciona una dirección del cliente para llenar este campo.";
+        }
+
+        /*
+         * Actualiza el texto de ayuda del textarea para que ya no diga
+         * que puede ajustarse manualmente.
+         */
+        const helperDireccion = direccionFacturacion ?
+            direccionFacturacion.closest(".col-md-12")?.querySelector(".helper-text") :
+            null;
+
+        if (helperDireccion) {
+            helperDireccion.textContent =
+                "Esta dirección se llena automáticamente al seleccionar una dirección del cliente.";
+        }
+
+        /*
+         * Campos de texto que sí deben convertirse a mayúsculas.
+         * No afecta fechas, números ni selects.
+         */
+        const selectorMayusculas = [
+            '#folio_factura',
+            '#sales_man',
+            '#terms',
+            '#notas',
+            '#direccion_facturacion',
+            '.input-descripcion'
+        ].join(',');
+
+        function convertirValorAMayusculas(campo) {
+            if (!campo || typeof campo.value !== "string") return;
+
+            const inicio = campo.selectionStart;
+            const fin = campo.selectionEnd;
+
+            campo.value = campo.value.toUpperCase();
+
+            /*
+             * Conserva la posición del cursor en campos editables.
+             * En readonly puede lanzar error en algunos navegadores, por eso va protegido.
+             */
+            try {
+                if (!campo.readOnly && document.activeElement === campo) {
+                    campo.setSelectionRange(inicio, fin);
+                }
+            } catch (e) {}
+        }
+
+        function convertirFormularioAMayusculas() {
+            if (!formFactura) return;
+
+            const campos = formFactura.querySelectorAll(selectorMayusculas);
+
+            campos.forEach(function(campo) {
+                convertirValorAMayusculas(campo);
+            });
+        }
+
+        /*
+         * Convierte a mayúsculas mientras el usuario escribe.
+         * Funciona también para partidas agregadas dinámicamente.
+         */
+        document.addEventListener("input", function(e) {
+            if (!e.target.matches(selectorMayusculas)) return;
+
+            convertirValorAMayusculas(e.target);
+        });
+
+        /*
+         * Cuando cambian cliente o dirección, facturas.js llena automáticamente
+         * direccion_facturacion. Después de ese llenado, forzamos mayúsculas.
+         */
+        document.addEventListener("change", function(e) {
+            if (
+                e.target.id === "id_cliente" ||
+                e.target.id === "id_cliente_direccion"
+            ) {
+                setTimeout(function() {
+                    convertirFormularioAMayusculas();
+                }, 150);
+            }
+        });
+
+        /*
+         * Cuando se abre el modal en edición, facturas.js puede llenar datos
+         * desde AJAX. Forzamos mayúsculas al mostrarse.
+         */
+        if (modalFacturaEl) {
+            modalFacturaEl.addEventListener("shown.bs.modal", function() {
+                setTimeout(function() {
+                    convertirFormularioAMayusculas();
+                }, 250);
+            });
+        }
+
+        /*
+         * Antes de enviar, convertimos todo de nuevo.
+         * Esto asegura que aunque algún valor se haya llenado por JS,
+         * se mande en mayúsculas al backend.
+         */
+        if (formFactura) {
+            formFactura.addEventListener("submit", function() {
+                convertirFormularioAMayusculas();
+            }, true);
+        }
+
+        /*
+         * Refuerzo ligero:
+         * Mientras el modal esté abierto, revisa cada poco tiempo si JS llenó
+         * la dirección o partidas y las normaliza a mayúsculas.
+         */
+        let intervaloMayusculas = null;
+
+        if (modalFacturaEl) {
+            modalFacturaEl.addEventListener("shown.bs.modal", function() {
+                if (intervaloMayusculas) {
+                    clearInterval(intervaloMayusculas);
+                }
+
+                intervaloMayusculas = setInterval(function() {
+                    convertirFormularioAMayusculas();
+                }, 500);
+            });
+
+            modalFacturaEl.addEventListener("hidden.bs.modal", function() {
+                if (intervaloMayusculas) {
+                    clearInterval(intervaloMayusculas);
+                    intervaloMayusculas = null;
+                }
+            });
+        }
+    });
+</script>
+
+<?php require_once 'Views/Template/footer-admin.php'; ?>
 
 <?php require_once 'Views/Template/footer-admin.php'; ?>

@@ -94,6 +94,65 @@ class Facturas extends Controller
         }
     }
 
+
+    public function direccionesCliente($id_cliente = null)
+    {
+        header('Content-Type: application/json; charset=utf-8');
+
+        if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
+            echo json_encode([
+                'ok' => false,
+                'msg' => 'Método no permitido.'
+            ], JSON_UNESCAPED_UNICODE);
+            return;
+        }
+
+        $id_cliente = (int)($id_cliente ?? 0);
+
+        if ($id_cliente <= 0) {
+            echo json_encode([
+                'ok' => false,
+                'msg' => 'ID de cliente inválido.'
+            ], JSON_UNESCAPED_UNICODE);
+            return;
+        }
+
+        try {
+            $cliente = $this->model->obtenerCliente($id_cliente);
+
+            if (!$cliente) {
+                echo json_encode([
+                    'ok' => false,
+                    'msg' => 'Cliente no encontrado.'
+                ], JSON_UNESCAPED_UNICODE);
+                return;
+            }
+
+            if ((int)$cliente['estado'] !== 1) {
+                echo json_encode([
+                    'ok' => false,
+                    'msg' => 'El cliente está inactivo.'
+                ], JSON_UNESCAPED_UNICODE);
+                return;
+            }
+
+            $direcciones = $this->model->listarDireccionesClienteActivas($id_cliente);
+
+            echo json_encode([
+                'ok' => true,
+                'data' => $direcciones
+            ], JSON_UNESCAPED_UNICODE);
+        } catch (Throwable $e) {
+            echo json_encode([
+                'ok' => false,
+                'msg' => 'Error al listar direcciones del cliente.',
+                'error' => $e->getMessage()
+            ], JSON_UNESCAPED_UNICODE);
+        }
+    }
+
+
+
     public function obtener($id_factura = null)
     {
         header('Content-Type: application/json; charset=utf-8');
@@ -182,12 +241,13 @@ class Facturas extends Controller
             $folioFactura = $serie . '-' . str_pad((string)$nuevoNumero, 8, '0', STR_PAD_LEFT);
 
             $this->model->actualizarUltimoFolio((int)$folio['id_folio'], $nuevoNumero);
-
             $id_factura = $this->model->registrarFactura(
                 $serie,
                 $nuevoNumero,
                 $folioFactura,
                 $payload['id_cliente'],
+                $payload['id_cliente_direccion'],
+                $payload['direccion_facturacion'],
                 $payload['fecha_factura'],
                 $payload['sales_man'],
                 $payload['terms'],
@@ -314,6 +374,8 @@ class Facturas extends Controller
             $actualizado = $this->model->actualizarFactura(
                 $id_factura,
                 $payload['id_cliente'],
+                $payload['id_cliente_direccion'],
+                $payload['direccion_facturacion'],
                 $payload['fecha_factura'],
                 $payload['sales_man'],
                 $payload['terms'],
@@ -454,6 +516,9 @@ class Facturas extends Controller
     {
         $id_folio = (int)($_POST['id_folio'] ?? 0);
         $id_cliente = (int)($_POST['id_cliente'] ?? 0);
+        $id_cliente_direccion = (int)($_POST['id_cliente_direccion'] ?? 0);
+        $direccion_facturacion = trim($_POST['direccion_facturacion'] ?? '');
+
         $fecha_factura = trim($_POST['fecha_factura'] ?? '');
         $sales_man = trim($_POST['sales_man'] ?? '');
         $terms = trim($_POST['terms'] ?? '');
@@ -488,12 +553,77 @@ class Facturas extends Controller
                 'msg' => 'El cliente seleccionado está inactivo.'
             ];
         }
+
+        /*
+     * DIRECCIÓN DE FACTURACIÓN
+     * Si viene id_cliente_direccion, validamos que exista,
+     * esté activa y pertenezca al cliente.
+     */
+        if ($id_cliente_direccion > 0) {
+            $direccionSeleccionada = $this->model->obtenerDireccionClienteActiva(
+                $id_cliente_direccion,
+                $id_cliente
+            );
+
+            if (!$direccionSeleccionada) {
+                return [
+                    'ok' => false,
+                    'msg' => 'La dirección seleccionada no existe, está inactiva o no pertenece al cliente.'
+                ];
+            }
+
+            /*
+         * Si el textarea viene vacío, usamos la dirección seleccionada.
+         * Si viene con texto, respetamos el texto escrito para guardar snapshot.
+         */
+            if ($direccion_facturacion === '') {
+                $direccion_facturacion = trim($direccionSeleccionada['direccion'] ?? '');
+            }
+        }
+
+        /*
+     * Fallback:
+     * Si no seleccionaron dirección pero el cliente tiene dirección principal,
+     * usamos la dirección principal.
+     */
+        if ($direccion_facturacion === '') {
+            $direccionPrincipal = $this->model->obtenerDireccionPrincipalCliente($id_cliente);
+
+            if ($direccionPrincipal) {
+                $id_cliente_direccion = (int)$direccionPrincipal['id_direccion'];
+                $direccion_facturacion = trim($direccionPrincipal['direccion'] ?? '');
+            }
+        }
+
+        /*
+     * Segundo fallback:
+     * Si todavía no hay dirección, usamos clientes.direccion para compatibilidad.
+     */
+        if ($direccion_facturacion === '') {
+            $direccion_facturacion = trim($cliente['direccion'] ?? '');
+        }
+
+        if ($direccion_facturacion === '') {
+            return [
+                'ok' => false,
+                'msg' => 'Selecciona o ingresa la dirección de facturación.'
+            ];
+        }
+
+        if (strlen($direccion_facturacion) > 1000) {
+            return [
+                'ok' => false,
+                'msg' => 'La dirección de facturación no puede superar 1000 caracteres.'
+            ];
+        }
+
         if (!$esEdicion && $id_folio <= 0) {
             return [
                 'ok' => false,
                 'msg' => 'Selecciona una serie válida para la factura.'
             ];
         }
+
         if ($fecha_factura === '' || !$this->validarFecha($fecha_factura)) {
             return [
                 'ok' => false,
@@ -591,6 +721,8 @@ class Facturas extends Controller
             'data' => [
                 'id_folio' => $id_folio,
                 'id_cliente' => $id_cliente,
+                'id_cliente_direccion' => $id_cliente_direccion > 0 ? $id_cliente_direccion : null,
+                'direccion_facturacion' => $direccion_facturacion,
                 'fecha_factura' => $fecha_factura,
                 'sales_man' => $sales_man !== '' ? $sales_man : null,
                 'terms' => $terms !== '' ? $terms : null,

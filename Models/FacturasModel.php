@@ -35,16 +35,35 @@ class FacturasModel extends Query
     public function listarClientesActivos()
     {
         $sql = "SELECT 
-                    id_cliente,
-                    codigo_cliente,
-                    nombre_cliente,
-                    rfc,
-                    correo,
-                    telefono,
-                    direccion
-                FROM clientes
-                WHERE estado = 1
-                ORDER BY nombre_cliente ASC";
+                    c.id_cliente,
+                    c.codigo_cliente,
+                    c.nombre_cliente,
+                    c.rfc,
+                    c.correo,
+                    c.telefono,
+                    c.direccion,
+
+                    (
+                        SELECT cd.id_direccion
+                        FROM cliente_direcciones cd
+                        WHERE cd.id_cliente = c.id_cliente
+                          AND cd.estado = 1
+                        ORDER BY cd.es_principal DESC, cd.id_direccion ASC
+                        LIMIT 1
+                    ) AS id_direccion_principal,
+
+                    (
+                        SELECT cd2.direccion
+                        FROM cliente_direcciones cd2
+                        WHERE cd2.id_cliente = c.id_cliente
+                          AND cd2.estado = 1
+                        ORDER BY cd2.es_principal DESC, cd2.id_direccion ASC
+                        LIMIT 1
+                    ) AS direccion_principal
+
+                FROM clientes c
+                WHERE c.estado = 1
+                ORDER BY c.nombre_cliente ASC";
 
         return $this->selectAll($sql);
     }
@@ -52,16 +71,115 @@ class FacturasModel extends Query
     public function obtenerCliente(int $id_cliente)
     {
         $sql = "SELECT 
+                    c.id_cliente,
+                    c.codigo_cliente,
+                    c.nombre_cliente,
+                    c.rfc,
+                    c.correo,
+                    c.telefono,
+                    c.direccion,
+                    c.estado,
+
+                    (
+                        SELECT cd.id_direccion
+                        FROM cliente_direcciones cd
+                        WHERE cd.id_cliente = c.id_cliente
+                          AND cd.estado = 1
+                        ORDER BY cd.es_principal DESC, cd.id_direccion ASC
+                        LIMIT 1
+                    ) AS id_direccion_principal,
+
+                    (
+                        SELECT cd2.direccion
+                        FROM cliente_direcciones cd2
+                        WHERE cd2.id_cliente = c.id_cliente
+                          AND cd2.estado = 1
+                        ORDER BY cd2.es_principal DESC, cd2.id_direccion ASC
+                        LIMIT 1
+                    ) AS direccion_principal
+
+                FROM clientes c
+                WHERE c.id_cliente = ?
+                LIMIT 1";
+
+        return $this->select($sql, [$id_cliente]);
+    }
+
+    public function listarDireccionesClienteActivas(int $id_cliente)
+    {
+        $sql = "SELECT
+                    id_direccion,
                     id_cliente,
-                    codigo_cliente,
-                    nombre_cliente,
-                    rfc,
-                    correo,
-                    telefono,
+                    alias,
                     direccion,
-                    estado
-                FROM clientes
+                    es_principal,
+                    estado,
+                    creado_en,
+                    actualizado_en
+                FROM cliente_direcciones
                 WHERE id_cliente = ?
+                  AND estado = 1
+                ORDER BY es_principal DESC, id_direccion ASC";
+
+        return $this->selectAll($sql, [$id_cliente]);
+    }
+
+    public function obtenerDireccionCliente(int $id_direccion)
+    {
+        $sql = "SELECT
+                    id_direccion,
+                    id_cliente,
+                    alias,
+                    direccion,
+                    es_principal,
+                    estado,
+                    creado_en,
+                    actualizado_en
+                FROM cliente_direcciones
+                WHERE id_direccion = ?
+                LIMIT 1";
+
+        return $this->select($sql, [$id_direccion]);
+    }
+
+    public function obtenerDireccionClienteActiva(int $id_direccion, int $id_cliente)
+    {
+        $sql = "SELECT
+                    id_direccion,
+                    id_cliente,
+                    alias,
+                    direccion,
+                    es_principal,
+                    estado,
+                    creado_en,
+                    actualizado_en
+                FROM cliente_direcciones
+                WHERE id_direccion = ?
+                  AND id_cliente = ?
+                  AND estado = 1
+                LIMIT 1";
+
+        return $this->select($sql, [
+            $id_direccion,
+            $id_cliente
+        ]);
+    }
+
+    public function obtenerDireccionPrincipalCliente(int $id_cliente)
+    {
+        $sql = "SELECT
+                    id_direccion,
+                    id_cliente,
+                    alias,
+                    direccion,
+                    es_principal,
+                    estado,
+                    creado_en,
+                    actualizado_en
+                FROM cliente_direcciones
+                WHERE id_cliente = ?
+                  AND estado = 1
+                ORDER BY es_principal DESC, id_direccion ASC
                 LIMIT 1";
 
         return $this->select($sql, [$id_cliente]);
@@ -113,15 +231,15 @@ class FacturasModel extends Query
     public function obtenerFolioBloqueadoPorId(int $id_folio)
     {
         $sql = "SELECT 
-                id_folio,
-                serie,
-                ultimo_numero,
-                activo
-            FROM folios_factura
-            WHERE id_folio = ?
-              AND activo = 1
-            LIMIT 1
-            FOR UPDATE";
+                    id_folio,
+                    serie,
+                    ultimo_numero,
+                    activo
+                FROM folios_factura
+                WHERE id_folio = ?
+                  AND activo = 1
+                LIMIT 1
+                FOR UPDATE";
 
         return $this->select($sql, [$id_folio]);
     }
@@ -158,6 +276,7 @@ class FacturasModel extends Query
                 f.folio_factura LIKE ?
                 OR c.codigo_cliente LIKE ?
                 OR c.nombre_cliente LIKE ?
+                OR COALESCE(NULLIF(f.direccion_facturacion, ''), c.direccion) LIKE ?
                 OR u.nombre LIKE ?
                 OR u.apellido LIKE ?
                 OR u.usuario LIKE ?
@@ -165,6 +284,7 @@ class FacturasModel extends Query
 
             $term = '%' . $buscar . '%';
 
+            $params[] = $term;
             $params[] = $term;
             $params[] = $term;
             $params[] = $term;
@@ -194,6 +314,9 @@ class FacturasModel extends Query
                     f.numero_factura,
                     f.folio_factura,
                     f.id_cliente,
+                    f.id_cliente_direccion,
+                    f.direccion_facturacion,
+                    COALESCE(NULLIF(f.direccion_facturacion, ''), c.direccion) AS direccion,
                     c.codigo_cliente,
                     c.nombre_cliente,
                     f.fecha_factura,
@@ -231,12 +354,15 @@ class FacturasModel extends Query
                     f.numero_factura,
                     f.folio_factura,
                     f.id_cliente,
+                    f.id_cliente_direccion,
+                    f.direccion_facturacion,
                     c.codigo_cliente,
                     c.nombre_cliente,
                     c.rfc,
                     c.correo,
                     c.telefono,
-                    c.direccion,
+                    COALESCE(NULLIF(f.direccion_facturacion, ''), c.direccion) AS direccion,
+                    cd.alias AS direccion_alias,
                     f.fecha_factura,
                     f.sales_man,
                     f.terms,
@@ -254,6 +380,7 @@ class FacturasModel extends Query
                 FROM facturas f
                 INNER JOIN clientes c ON c.id_cliente = f.id_cliente
                 INNER JOIN usuarios u ON u.id_usuario = f.creado_por
+                LEFT JOIN cliente_direcciones cd ON cd.id_direccion = f.id_cliente_direccion
                 WHERE f.id_factura = ?
                 LIMIT 1";
 
@@ -299,6 +426,8 @@ class FacturasModel extends Query
         int $numero_factura,
         string $folio_factura,
         int $id_cliente,
+        ?int $id_cliente_direccion,
+        string $direccion_facturacion,
         string $fecha_factura,
         ?string $sales_man,
         ?string $terms,
@@ -316,6 +445,8 @@ class FacturasModel extends Query
                     numero_factura,
                     folio_factura,
                     id_cliente,
+                    id_cliente_direccion,
+                    direccion_facturacion,
                     fecha_factura,
                     sales_man,
                     terms,
@@ -327,13 +458,15 @@ class FacturasModel extends Query
                     total,
                     estado_factura,
                     creado_por
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
         return $this->insertar($sql, [
             $serie,
             $numero_factura,
             $folio_factura,
             $id_cliente,
+            $id_cliente_direccion,
+            $direccion_facturacion,
             $fecha_factura,
             $sales_man,
             $terms,
@@ -378,12 +511,13 @@ class FacturasModel extends Query
     /* ============================================================
        ACTUALIZAR FACTURA
        Nota: se permite editar facturas siempre que no estén canceladas.
-       Si después quieres bloquear edición de emitidas, lo hacemos.
     ============================================================ */
 
     public function actualizarFactura(
         int $id_factura,
         int $id_cliente,
+        ?int $id_cliente_direccion,
+        string $direccion_facturacion,
         string $fecha_factura,
         ?string $sales_man,
         ?string $terms,
@@ -398,6 +532,8 @@ class FacturasModel extends Query
         $sql = "UPDATE facturas
                 SET
                     id_cliente = ?,
+                    id_cliente_direccion = ?,
+                    direccion_facturacion = ?,
                     fecha_factura = ?,
                     sales_man = ?,
                     terms = ?,
@@ -413,6 +549,8 @@ class FacturasModel extends Query
 
         return $this->save($sql, [
             $id_cliente,
+            $id_cliente_direccion,
+            $direccion_facturacion,
             $fecha_factura,
             $sales_man,
             $terms,
@@ -527,40 +665,40 @@ class FacturasModel extends Query
         ]);
     }
 
+    /* ============================================================
+       GENERACIÓN PDF / CONFIGURACIÓN
+    ============================================================ */
 
-
-    //GENERACION PDF
     public function obtenerEmpresaConfiguracion()
     {
         $sql = "SELECT 
-                id_empresa,
-                nombre_empresa,
-                tax_id,
-                telefono,
-                correo,
-                direccion,
-                logo,
-                color_principal,
-                texto_pie_pagina,
-                actualizado_en
-            FROM empresa_configuracion
-            ORDER BY id_empresa ASC
-            LIMIT 1";
+                    id_empresa,
+                    nombre_empresa,
+                    tax_id,
+                    telefono,
+                    correo,
+                    direccion,
+                    logo,
+                    color_principal,
+                    texto_pie_pagina,
+                    actualizado_en
+                FROM empresa_configuracion
+                ORDER BY id_empresa ASC
+                LIMIT 1";
 
         return $this->select($sql);
     }
 
-
     public function listarFoliosActivos()
     {
         $sql = "SELECT 
-                id_folio,
-                serie,
-                ultimo_numero,
-                activo
-            FROM folios_factura
-            WHERE activo = 1
-            ORDER BY serie ASC";
+                    id_folio,
+                    serie,
+                    ultimo_numero,
+                    activo
+                FROM folios_factura
+                WHERE activo = 1
+                ORDER BY serie ASC";
 
         return $this->selectAll($sql);
     }

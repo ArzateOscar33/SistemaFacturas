@@ -18,6 +18,12 @@ document.addEventListener("DOMContentLoaded", function () {
   const inputFechaFactura = document.getElementById("fecha_factura");
   const selectEstadoFactura = document.getElementById("estado_factura");
   const selectCliente = document.getElementById("id_cliente");
+  const selectClienteDireccion = document.getElementById(
+    "id_cliente_direccion",
+  );
+  const inputDireccionFacturacion = document.getElementById(
+    "direccion_facturacion",
+  );
   const inputSalesMan = document.getElementById("sales_man");
   const inputTerms = document.getElementById("terms");
   const inputTasaImpuesto = document.getElementById("tasa_impuesto");
@@ -46,6 +52,8 @@ document.addEventListener("DOMContentLoaded", function () {
   let modalFactura = null;
   let timerBusqueda = null;
   let contadorPartidas = 0;
+  let clientesCache = [];
+  let direccionesClienteCache = [];
 
   if (modalFacturaEl) {
     modalFactura = new bootstrap.Modal(modalFacturaEl, {
@@ -140,6 +148,26 @@ document.addEventListener("DOMContentLoaded", function () {
     });
   }
 
+  if (selectCliente) {
+    selectCliente.addEventListener("change", function () {
+      const idCliente = selectCliente.value.trim();
+
+      limpiarDireccionesCliente();
+
+      if (!idCliente) {
+        return;
+      }
+
+      cargarDireccionesCliente(idCliente);
+    });
+  }
+
+  if (selectClienteDireccion) {
+    selectClienteDireccion.addEventListener("change", function () {
+      llenarDireccionFacturacionDesdeSelect();
+    });
+  }
+
   if (tbodyFacturas) {
     tbodyFacturas.addEventListener("click", function (e) {
       const btnEditar = e.target.closest(".btnEditarFactura");
@@ -173,10 +201,14 @@ document.addEventListener("DOMContentLoaded", function () {
   }
 
   /* ============================================================
-     CLIENTES
+     CLIENTES / DIRECCIONES
   ============================================================ */
-  function cargarClientes() {
-    if (!selectCliente) return;
+
+  function cargarClientes(callback = null) {
+    if (!selectCliente) {
+      if (typeof callback === "function") callback();
+      return;
+    }
 
     selectCliente.innerHTML = `<option value="">Cargando clientes...</option>`;
 
@@ -189,6 +221,8 @@ document.addEventListener("DOMContentLoaded", function () {
       if (xhr.status !== 200) {
         selectCliente.innerHTML = `<option value="">Error al cargar clientes</option>`;
         console.error("Error HTTP clientes:", xhr.status, xhr.responseText);
+
+        if (typeof callback === "function") callback();
         return;
       }
 
@@ -198,32 +232,204 @@ document.addEventListener("DOMContentLoaded", function () {
         if (!res.ok) {
           selectCliente.innerHTML = `<option value="">Error al cargar clientes</option>`;
           console.error(res.msg || "No se pudieron cargar los clientes.");
+
+          if (typeof callback === "function") callback();
           return;
         }
 
+        clientesCache = res.data || [];
+
         let html = `<option value="">Seleccione un cliente</option>`;
 
-        (res.data || []).forEach(function (cliente) {
+        clientesCache.forEach(function (cliente) {
+          const direccionPreview =
+            cliente.direccion_principal || cliente.direccion || "";
+
           html += `
-            <option value="${escapeHtml(cliente.id_cliente)}">
+            <option value="${escapeHtml(cliente.id_cliente)}"
+                    data-id-direccion-principal="${escapeAttr(cliente.id_direccion_principal || "")}"
+                    data-direccion-principal="${escapeAttr(direccionPreview)}">
               ${escapeHtml(cliente.codigo_cliente)} - ${escapeHtml(cliente.nombre_cliente)}
             </option>
           `;
         });
 
         selectCliente.innerHTML = html;
+
+        if (typeof callback === "function") callback();
       } catch (error) {
         console.error("JSON inválido clientes:", error, xhr.responseText);
         selectCliente.innerHTML = `<option value="">Respuesta inválida</option>`;
+
+        if (typeof callback === "function") callback();
       }
     };
 
     xhr.send();
   }
 
+  function cargarDireccionesCliente(
+    idCliente,
+    idDireccionSeleccionada = "",
+    direccionSnapshot = "",
+  ) {
+    if (!selectClienteDireccion) return;
+
+    selectClienteDireccion.disabled = true;
+    selectClienteDireccion.innerHTML = `<option value="">Cargando direcciones...</option>`;
+
+    if (inputDireccionFacturacion && !direccionSnapshot) {
+      inputDireccionFacturacion.value = "";
+    }
+
+    const xhr = new XMLHttpRequest();
+    xhr.open(
+      "GET",
+      base_url + "facturas/direccionesCliente/" + encodeURIComponent(idCliente),
+      true,
+    );
+
+    xhr.onreadystatechange = function () {
+      if (xhr.readyState !== 4) return;
+
+      selectClienteDireccion.disabled = false;
+
+      if (xhr.status !== 200) {
+        console.error(
+          "Error HTTP direcciones cliente:",
+          xhr.status,
+          xhr.responseText,
+        );
+
+        renderDireccionesCliente([]);
+        aplicarFallbackDireccionCliente(direccionSnapshot);
+        return;
+      }
+
+      try {
+        const res = JSON.parse(xhr.responseText);
+
+        if (!res.ok) {
+          console.error(res.msg || "No se pudieron cargar las direcciones.");
+          renderDireccionesCliente([]);
+          aplicarFallbackDireccionCliente(direccionSnapshot);
+          return;
+        }
+
+        direccionesClienteCache = res.data || [];
+
+        renderDireccionesCliente(direccionesClienteCache);
+
+        if (idDireccionSeleccionada && selectClienteDireccion) {
+          selectClienteDireccion.value = String(idDireccionSeleccionada);
+        }
+
+        if (
+          selectClienteDireccion &&
+          !selectClienteDireccion.value &&
+          selectClienteDireccion.options.length === 2
+        ) {
+          selectClienteDireccion.selectedIndex = 1;
+        }
+
+        if (direccionSnapshot && inputDireccionFacturacion) {
+          inputDireccionFacturacion.value = direccionSnapshot;
+        } else {
+          llenarDireccionFacturacionDesdeSelect();
+        }
+      } catch (error) {
+        console.error("JSON inválido direcciones:", error, xhr.responseText);
+        renderDireccionesCliente([]);
+        aplicarFallbackDireccionCliente(direccionSnapshot);
+      }
+    };
+
+    xhr.send();
+  }
+
+  function renderDireccionesCliente(direcciones) {
+    if (!selectClienteDireccion) return;
+
+    selectClienteDireccion.innerHTML = `<option value="">Seleccione una dirección</option>`;
+
+    if (!direcciones.length) {
+      selectClienteDireccion.innerHTML = `<option value="">Sin direcciones registradas</option>`;
+      return;
+    }
+
+    direcciones.forEach(function (direccion) {
+      const option = document.createElement("option");
+
+      const alias = direccion.alias ? direccion.alias : "Dirección";
+      const principal = Number(direccion.es_principal || 0) === 1;
+      const etiquetaPrincipal = principal ? "Principal - " : "";
+
+      option.value = direccion.id_direccion;
+      option.dataset.direccion = direccion.direccion || "";
+      option.dataset.alias = direccion.alias || "";
+      option.textContent = `${etiquetaPrincipal}${alias}`;
+
+      selectClienteDireccion.appendChild(option);
+    });
+  }
+
+  function llenarDireccionFacturacionDesdeSelect() {
+    if (!selectClienteDireccion || !inputDireccionFacturacion) return;
+
+    const option =
+      selectClienteDireccion.options[selectClienteDireccion.selectedIndex];
+
+    if (!option || !option.value) {
+      inputDireccionFacturacion.value = "";
+      return;
+    }
+
+    inputDireccionFacturacion.value = option.dataset.direccion || "";
+  }
+
+  function limpiarDireccionesCliente() {
+    direccionesClienteCache = [];
+
+    if (selectClienteDireccion) {
+      selectClienteDireccion.disabled = false;
+      selectClienteDireccion.innerHTML = `<option value="">Seleccione una dirección</option>`;
+      selectClienteDireccion.value = "";
+      selectClienteDireccion.classList.remove("is-invalid", "is-valid");
+    }
+
+    if (inputDireccionFacturacion) {
+      inputDireccionFacturacion.value = "";
+      inputDireccionFacturacion.classList.remove("is-invalid", "is-valid");
+    }
+  }
+
+  function aplicarFallbackDireccionCliente(direccionSnapshot = "") {
+    if (!inputDireccionFacturacion) return;
+
+    if (direccionSnapshot) {
+      inputDireccionFacturacion.value = direccionSnapshot;
+      return;
+    }
+
+    if (!selectCliente) {
+      inputDireccionFacturacion.value = "";
+      return;
+    }
+
+    const option = selectCliente.options[selectCliente.selectedIndex];
+
+    if (!option || !option.value) {
+      inputDireccionFacturacion.value = "";
+      return;
+    }
+
+    inputDireccionFacturacion.value = option.dataset.direccionPrincipal || "";
+  }
+
   /* ============================================================
      FOLIOS / SERIES
   ============================================================ */
+
   function cargarFolios(callback = null) {
     if (!selectFolio) {
       if (typeof callback === "function") callback();
@@ -340,6 +546,7 @@ document.addEventListener("DOMContentLoaded", function () {
   /* ============================================================
      LISTADO FACTURAS
   ============================================================ */
+
   function cargarFacturas() {
     if (!tbodyFacturas) return;
 
@@ -446,7 +653,14 @@ document.addEventListener("DOMContentLoaded", function () {
             <strong>${escapeHtml(factura.folio_factura || "")}</strong>
           </td>
 
-          <td>${escapeHtml(factura.nombre_cliente || "")}</td>
+          <td>
+            <div class="fw-semibold">${escapeHtml(factura.nombre_cliente || "")}</div>
+            ${
+              factura.direccion
+                ? `<div class="text-secondary small">${escapeHtml(factura.direccion)}</div>`
+                : ""
+            }
+          </td>
 
           <td>${formatearFecha(factura.fecha_factura)}</td>
 
@@ -495,6 +709,7 @@ document.addEventListener("DOMContentLoaded", function () {
   /* ============================================================
      NUEVA / EDITAR FACTURA
   ============================================================ */
+
   function abrirModalNuevaFactura() {
     limpiarFormularioFactura();
 
@@ -632,14 +847,32 @@ document.addEventListener("DOMContentLoaded", function () {
       inputFolioFactura.value = factura.folio_factura || "";
     if (inputFechaFactura)
       inputFechaFactura.value = factura.fecha_factura || "";
-    if (selectEstadoFactura)
+    if (selectEstadoFactura) {
       selectEstadoFactura.value = factura.estado_factura || "emitida";
-    if (selectCliente) selectCliente.value = String(factura.id_cliente || "");
+    }
+
+    if (selectCliente) {
+      selectCliente.value = String(factura.id_cliente || "");
+    }
+
     if (inputSalesMan) inputSalesMan.value = factura.sales_man || "";
     if (inputTerms) inputTerms.value = factura.terms || "";
     if (inputTasaImpuesto) inputTasaImpuesto.value = factura.tasa_impuesto || 0;
     if (inputOtrosCargos) inputOtrosCargos.value = factura.otros_cargos || 0;
     if (inputNotas) inputNotas.value = factura.notas || "";
+
+    if (inputDireccionFacturacion) {
+      inputDireccionFacturacion.value =
+        factura.direccion_facturacion || factura.direccion || "";
+    }
+
+    if (factura.id_cliente) {
+      cargarDireccionesCliente(
+        factura.id_cliente,
+        factura.id_cliente_direccion || "",
+        factura.direccion_facturacion || factura.direccion || "",
+      );
+    }
 
     bloquearSerieParaEdicion(factura);
 
@@ -665,6 +898,7 @@ document.addEventListener("DOMContentLoaded", function () {
   /* ============================================================
      GUARDAR FACTURA
   ============================================================ */
+
   function guardarFactura() {
     if (!formFactura) return;
 
@@ -757,6 +991,7 @@ document.addEventListener("DOMContentLoaded", function () {
   /* ============================================================
      CANCELAR FACTURA
   ============================================================ */
+
   function confirmarCancelarFactura(idFactura) {
     if (!idFactura) return;
 
@@ -842,6 +1077,7 @@ document.addEventListener("DOMContentLoaded", function () {
   /* ============================================================
      PARTIDAS
   ============================================================ */
+
   function agregarPartida(data = {}) {
     if (!tbodyPartidasFactura) return;
 
@@ -978,14 +1214,16 @@ document.addEventListener("DOMContentLoaded", function () {
 
     if (resumenSubtotal) resumenSubtotal.textContent = formatoMoneda(subtotal);
     if (resumenImpuesto) resumenImpuesto.textContent = formatoMoneda(impuesto);
-    if (resumenOtrosCargos)
+    if (resumenOtrosCargos) {
       resumenOtrosCargos.textContent = formatoMoneda(otros);
+    }
     if (resumenTotal) resumenTotal.textContent = formatoMoneda(total);
   }
 
   /* ============================================================
      VALIDACIONES
   ============================================================ */
+
   function validarFactura() {
     limpiarValidaciones();
 
@@ -1008,6 +1246,31 @@ document.addEventListener("DOMContentLoaded", function () {
       alertaValidacion(
         "Cliente requerido",
         "Selecciona un cliente para la factura.",
+      );
+
+      return false;
+    }
+
+    if (
+      !inputDireccionFacturacion ||
+      inputDireccionFacturacion.value.trim() === ""
+    ) {
+      marcarInvalido(inputDireccionFacturacion);
+
+      alertaValidacion(
+        "Dirección requerida",
+        "Selecciona o escribe la dirección de facturación.",
+      );
+
+      return false;
+    }
+
+    if (inputDireccionFacturacion.value.trim().length > 1000) {
+      marcarInvalido(inputDireccionFacturacion);
+
+      alertaValidacion(
+        "Dirección demasiado larga",
+        "La dirección de facturación no puede superar 1000 caracteres.",
       );
 
       return false;
@@ -1116,6 +1379,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
     if (selectFolio && idFactura === "") marcarValido(selectFolio);
     marcarValido(selectCliente);
+    marcarValido(inputDireccionFacturacion);
     marcarValido(inputFechaFactura);
 
     return true;
@@ -1137,6 +1401,7 @@ document.addEventListener("DOMContentLoaded", function () {
       selectFolio.value = "";
     }
 
+    limpiarDireccionesCliente();
     limpiarPartidas();
     limpiarValidaciones();
     recalcularTotales();
@@ -1151,6 +1416,8 @@ document.addEventListener("DOMContentLoaded", function () {
     const campos = [
       selectFolio,
       selectCliente,
+      selectClienteDireccion,
+      inputDireccionFacturacion,
       inputFechaFactura,
       selectEstadoFactura,
       inputSalesMan,
@@ -1178,6 +1445,7 @@ document.addEventListener("DOMContentLoaded", function () {
   /* ============================================================
      PDF
   ============================================================ */
+
   function descargarFactura(idFactura) {
     if (!idFactura) return;
 
@@ -1190,6 +1458,7 @@ document.addEventListener("DOMContentLoaded", function () {
   /* ============================================================
      UI HELPERS
   ============================================================ */
+
   function pintarErrorTabla(mensaje) {
     if (!tbodyFacturas) return;
 
@@ -1304,5 +1573,9 @@ document.addEventListener("DOMContentLoaded", function () {
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&#039;");
+  }
+
+  function escapeAttr(value) {
+    return escapeHtml(value).replace(/`/g, "&#096;");
   }
 });
